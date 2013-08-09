@@ -226,6 +226,7 @@ S04-declarations/multiple.t
 S04-declarations/my.t
 S04-declarations/our.t
 S04-declarations/state.t
+S04-declarations/will.t
 S04-exception-handlers/catch.t
 S04-exceptions/fail.t
 S04-phasers/ascending-order.t
@@ -241,7 +242,6 @@ S04-phasers/multiple.t
 S04-phasers/next.t
 S04-phasers/pre-post.t
 S04-phasers/rvalue.t
-S04-phasers/start.t
 S04-statement-modifiers/for.t
 S04-statement-modifiers/given.t 
 S04-statement-modifiers/if.t
@@ -262,6 +262,7 @@ S04-statements/loop.t
 S04-statements/map-and-sort-in-for.t
 S04-statements/next.t
 S04-statements/no-implicit-block.t
+S04-statements/once.t
 S04-statements/redo.t
 S04-statements/repeat.t
 S04-statements/return.t
@@ -621,7 +622,6 @@ S32-io/io-path-unix.t
 S32-io/io-path-win.t
 S32-io/io-path-cygwin.t
 S32-io/io-path.t
-S32-io/IO-Socket-INET.t
 S32-io/note.t
 S32-io/slurp.t
 S32-io/spurt.t
@@ -766,3 +766,4 @@ integration/variables-in-do.t
 integration/weird-errors.t
 rosettacode/greatest_element_of_a_list.t  
 rosettacode/sierpinski_triangle.t
+S32-io/IO-Socket-INET.t  # last to prevent load interference

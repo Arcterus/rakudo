@@ -29,9 +29,8 @@ class Perl6::Optimizer {
     # of line numbers.
     has %!worrying;
     
-    # The type type, Mu.
+    # Top type, Mu, and Any (the top non-junction type).
     has $!Mu;
-    # And the Any type, important for being the "not junction" type.
     has $!Any;
 
     # The Setting, which contains things like Signature and Parameter.
@@ -76,14 +75,14 @@ class Perl6::Optimizer {
             +%adverbs<optimize> !! 2;
         
         # Locate UNIT and some other useful symbols.
-        my $unit := $past<UNIT>;
         my $*GLOBALish := $past<GLOBALish>;
-        my $*W := $past<W>;
+        my $*W         := $past<W>;
+        my $unit       := $past<UNIT>;
         unless nqp::istype($unit, QAST::Block) {
             nqp::die("Optimizer could not find UNIT");
         }
         nqp::push(@!block_stack, $unit);
-        $!Mu := self.find_lexical('Mu');
+        $!Mu  := self.find_lexical('Mu');
         $!Any := self.find_lexical('Any');
         nqp::pop(@!block_stack);
         
@@ -139,7 +138,7 @@ class Perl6::Optimizer {
             my @sigsyms;
             for $block.symtable() {
                 my $name := $_.key;
-                if $name ne '$_' && $name ne 'call_sig' && $name ne '$*DISPATCHER' {
+                if $name ne '$_' && $name ne '$*DISPATCHER' {
                     @sigsyms.push($name);
                 }
             }
@@ -365,7 +364,9 @@ class Perl6::Optimizer {
                 $found := 1;
             }
             if $found {
+                # Pure operators can be constant folded.
                 if nqp::can($obj, 'IS_PURE') && $obj.IS_PURE {
+                    # First ensure we're not in void context; warn if so.
                     sub widen($m) {
                         my int $from := $m.from;
                         my int $to   := $m.to;
@@ -394,6 +395,8 @@ class Perl6::Optimizer {
                             last;
                         }
                     }
+                    
+                    # If so, attempt to constant fold.
                     if $all_args_known {
                         my int $survived := 0;
                         my $ret_value;
@@ -412,7 +415,7 @@ class Perl6::Optimizer {
                                 $wval.named($op.named);
                             }
                             # if it's an Int, Num or Str, we can create a Want
-                            # from it witt an int, num or str value.
+                            # from it with an int, num or str value.
                             my $want;
                             if nqp::istype($ret_value, self.find_in_setting("Int")) && !nqp::isbig_I(nqp::decont($ret_value)) {
                                 $want := QAST::Want.new($wval,
@@ -459,7 +462,7 @@ class Perl6::Optimizer {
                             }
                         }
                         elsif $ct_result_proto == -1 || @ct_result_multi[0] == -1 {
-                            self.report_innevitable_dispatch_failure($op, @types, @flags, $obj,
+                            self.report_inevitable_dispatch_failure($op, @types, @flags, $obj,
                                 :protoguilt($ct_result_proto == -1));
                         }
                     }
@@ -482,7 +485,7 @@ class Perl6::Optimizer {
                             }
                         }
                         elsif $ct_result == -1 {
-                            self.report_innevitable_dispatch_failure($op, @types, @flags, $obj);
+                            self.report_inevitable_dispatch_failure($op, @types, @flags, $obj);
                         }
                     }
                 }
@@ -639,7 +642,7 @@ class Perl6::Optimizer {
         [@types, @flags]
     }
     
-    method report_innevitable_dispatch_failure($op, @types, @flags, $obj, :$protoguilt) {
+    method report_inevitable_dispatch_failure($op, @types, @flags, $obj, :$protoguilt) {
         my @arg_names;
         my int $i := 0;
         while $i < +@types {

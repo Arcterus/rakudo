@@ -14,7 +14,20 @@ role STDActions {
     method trim_heredoc($doc, $stop, $origast) {
         $origast.pop();
         $origast.pop();
-        my int $indent := -nqp::chars($stop.MATCH<ws>.Str);
+
+        my str $ws := $stop.MATCH<ws>.Str;
+        my int $actualchars := nqp::chars($ws);
+        my int $indent := -$actualchars;
+
+        my int $tabstop := $*W.find_symbol(['$?TABSTOP']);
+        my int $checkidx := 0;
+        while $checkidx < $actualchars {
+            if nqp::substr($ws, $checkidx, 1) eq "\t" {
+                $indent := $indent - ($tabstop - 1);
+            }
+            $checkidx := $checkidx + 1;
+        }
+
         my $docast := $doc.MATCH.ast;
         if $docast.has_compile_time_value {
             my $dedented := nqp::unbox_s($docast.compile_time_value.indent($indent));
@@ -467,7 +480,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
 
             my $renderer := "Pod::To::$doc";
 
-            my $module := $*W.load_module($/, $renderer, $*GLOBALish);
+            my $module := $*W.load_module($/, $renderer, {}, $*GLOBALish);
 
             my $pod2text := QAST::Op.new(
                 :op<callmethod>, :name<render>, :node($/),
@@ -998,9 +1011,9 @@ class Perl6::Actions is HLL::Actions does STDActions {
                         QAST::Op.new(:name('&infix:<,>'), :op('call'), $xblock[0]),
                         block_closure($xblock[1])
         );
-        $past := QAST::Op.new(
-            :op<callmethod>, :name<eager>, $past
-        );
+        $past := QAST::Want.new(
+            QAST::Op.new( :op<callmethod>, :name<eager>, $past ),
+            'v', QAST::Op.new( :op<callmethod>, :name<sink>, $past ));
         make $past;
     }
 
@@ -1112,6 +1125,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
             QAST::Op.new( :op('getcurhllsym'),
                 QAST::SVal.new( :value('ModuleLoader') ) ),
             $name_past,
+            QAST::Op.new( :op('hash') ),
             $*W.symbol_lookup(['GLOBAL'], $/),
         );
         if $<module_name> {
@@ -1208,7 +1222,6 @@ class Perl6::Actions is HLL::Actions does STDActions {
     method statement_prefix:sym<BEGIN>($/) { make $*W.add_phaser($/, 'BEGIN', ($<blorst>.ast)<code_object>); }
     method statement_prefix:sym<CHECK>($/) { make $*W.add_phaser($/, 'CHECK', ($<blorst>.ast)<code_object>); }
     method statement_prefix:sym<INIT>($/)  { make $*W.add_phaser($/, 'INIT', ($<blorst>.ast)<code_object>, ($<blorst>.ast)<past_block>); }
-    method statement_prefix:sym<START>($/) { make $*W.add_phaser($/, 'START', ($<blorst>.ast)<code_object>); }
     method statement_prefix:sym<ENTER>($/) { make $*W.add_phaser($/, 'ENTER', ($<blorst>.ast)<code_object>); }
     method statement_prefix:sym<FIRST>($/) { make $*W.add_phaser($/, 'FIRST', ($<blorst>.ast)<code_object>); }
     
@@ -1234,6 +1247,31 @@ class Perl6::Actions is HLL::Actions does STDActions {
         my $past := block_closure($<blorst>.ast);
         $past<past_block>.push(QAST::Var.new( :name('Nil'), :scope('lexical') ));
         make QAST::Op.new( :op('call'), :name('&GATHER'), $past );
+    }
+
+    method statement_prefix:sym<once>($/) {
+
+        # create state variable to remember whether we ran the block
+        my $pad := $*W.cur_lexpad();
+        my $sym := $pad.unique('once_');
+        my $mu := $*W.find_symbol(['Mu']);
+        my $descriptor := $*W.create_container_descriptor($mu, 1, $sym);
+        my %info;
+        %info<container_type> := %info<container_base> := $*W.find_symbol(['Scalar']);
+        %info<default_value> := %info<bind_constraint> := %info<value_type> := $mu;
+        $*W.install_lexical_container($pad, $sym, %info, $descriptor, :scope('state'));
+
+        # generate code that runs the block only once
+        make QAST::Op.new(
+            :op('if'),
+            QAST::Op.new( :op('p6stateinit') ),
+            QAST::Op.new(
+                :op('p6store'),
+                QAST::Var.new( :name($sym), :scope('lexical') ),
+                QAST::Op.new( :op('call'), $<blorst>.ast )
+            ),
+            QAST::Var.new( :name($sym), :scope('lexical') )
+        );
     }
 
     method statement_prefix:sym<sink>($/) {
@@ -2022,7 +2060,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
             if $desigilname eq '' {
                 $name := QAST::Node.unique('ANON_VAR_');
             }
-            $*W.install_lexical_container($BLOCK, $name, %cont_info, $descriptor,
+            my $cont := $*W.install_lexical_container($BLOCK, $name, %cont_info, $descriptor,
                 :scope($*SCOPE), :package($*PACKAGE));
             
             # Set scope and type on container, and if needed emit code to
@@ -2057,6 +2095,21 @@ class Perl6::Actions is HLL::Actions does STDActions {
                     twigil => $twigil,
                     scope  => $*SCOPE,
                 );
+            }
+            
+            # Apply any traits.
+            if $trait_list {
+                my $Variable := $*W.find_symbol(['Variable']);
+                my $varvar   := nqp::create($Variable);
+                nqp::bindattr_s($varvar, $Variable, '$!name', $name);
+                nqp::bindattr_s($varvar, $Variable, '$!scope', $*SCOPE);
+                nqp::bindattr($varvar, $Variable, '$!var', $cont);
+                nqp::bindattr($varvar, $Variable, '$!block', $*DECLARAND);
+                nqp::bindattr($varvar, $Variable, '$!slash', $/);
+                for $trait_list {
+                    my $applier := $_.ast;
+                    if $applier { $applier($varvar); }
+                }
             }
         }
         else {
@@ -2100,6 +2153,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
                 unless nqp::objprimspec($block[1].returns) {
                     $block[1] := QAST::Op.new(
                         :op('p6decontrv'),
+                        QAST::WVal.new( :value($*DECLARAND) ),
                         $block[1]);
                 }
                 $block[1] := QAST::Op.new(
@@ -2494,7 +2548,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
             if is_clearly_returnless($past) {
                 $past[1] := QAST::Op.new(
                     :op('p6typecheckrv'),
-                    QAST::Op.new( :op('p6decontrv'), $past[1]),
+                    QAST::Op.new( :op('p6decontrv'), QAST::WVal.new( :value($*DECLARAND) ), $past[1] ),
                     QAST::WVal.new( :value($*DECLARAND) ));
             }
             else {
@@ -2589,6 +2643,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
         if is_clearly_returnless($block) {
             $block[1] := QAST::Op.new(
                 :op('p6decontrv'),
+                QAST::WVal.new( :value($*DECLARAND) ),
                 $block[1]);
         }
         else {
@@ -2733,14 +2788,16 @@ class Perl6::Actions is HLL::Actions does STDActions {
         else {
             $meta_meth := $*MULTINESS eq 'multi' ?? 'add_multi_method' !! 'add_method';
         }
-        if $scope ne 'anon' && nqp::can($*PACKAGE.HOW, $meta_meth) {
-            $*W.pkg_add_method($/, $*PACKAGE, $meta_meth, $name, $code);
-        }
-        elsif $scope eq '' || $scope eq 'has' {
-            my $nocando := $*MULTINESS eq 'multi' ?? 'multi-method' !! 'method';
-            nqp::printfh(nqp::getstderr(),
-                "Useless declaration of a has-scoped $nocando in " ~
-                ($*PKGDECL || "mainline") ~ "\n");
+        if $scope eq '' || $scope eq 'has' {
+            if nqp::can($*PACKAGE.HOW, $meta_meth) {
+                $*W.pkg_add_method($/, $*PACKAGE, $meta_meth, $name, $code);
+            }
+            else {
+                my $nocando := $*MULTINESS eq 'multi' ?? 'multi-method' !! 'method';
+                nqp::printfh(nqp::getstderr(),
+                    "Useless declaration of a has-scoped $nocando in " ~
+                    ($*PKGDECL || "mainline") ~ "\n");
+            }
         }
 
         # May also need it in lexpad and/or package.
@@ -5880,7 +5937,7 @@ class Perl6::Actions is HLL::Actions does STDActions {
                     :op<lexotic>, :name<RETURN>,
                     # If we fall off the bottom, decontainerize if
                     # rw not set.
-                    QAST::Op.new( :op('p6decontrv'), $past )
+                    QAST::Op.new( :op('p6decontrv'), QAST::WVal.new( :value($*DECLARAND) ), $past )
                 ),
                 QAST::Op.new(
                     :op<bind>,

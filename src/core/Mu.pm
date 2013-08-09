@@ -316,7 +316,8 @@ my class Mu {
         self.HOW.name(self) ~ '<' ~ nqp::tostr_I(self.WHERE) ~ '>'
     }
 
-    method Stringy() { self.Str }
+    proto method Stringy(|) { * }
+    multi method Stringy() { self.Str }
     
     method item(Mu \item:) is rw { item }
     
@@ -662,7 +663,9 @@ sub DUMP(|args (*@args, :$indent-step = 4, :%ctx?)) {
         %ctx{$where} = $obj_num;
 
         if    nqp::islist($topic) {
+#?if parrot
             $type = 'RPA' if $type eq 'ResizablePMCArray';
+#?endif
             my str $id = $type ~ '<' ~ $obj_num ~ '>';
 
             my @pieces;

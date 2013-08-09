@@ -1,9 +1,11 @@
-my class List does Positional {
-    # declared in BOOTSTRAP.pm:
-    #   is Iterable;           # parent class
-    #   has Mu $!items;        # RPA of our reified elements
-    #   has $!flattens;        # true if this list flattens its parcels
-    #   has $!nextiter;        # iterator for generating remaining elements
+# for our tantrums
+my class X::TypeCheck { ... }
+
+my class List does Positional { # declared in BOOTSTRAP
+    # class List is Iterable is Cool
+    #   has $!items;        # VM's array of our reified elements
+    #   has $!flattens;     # true if this list flattens its parcels
+    #   has $!nextiter;     # iterator for generating remaining elements
 
     method new(|) {
         my Mu $args := nqp::p6argvmarray();
@@ -96,6 +98,7 @@ my class List does Positional {
     method eager() { self.gimme(*); self }
 
     method elems() {
+        return 0 unless self.DEFINITE;
         # Get as many elements as we can.  If gimme stops before
         # reaching the end of the list, assume the list is infinite.
         my $n = self.gimme(*);
@@ -103,11 +106,13 @@ my class List does Positional {
     }
 
     method exists(\pos) {
+        return False unless self.DEFINITE;
         self.gimme(pos + 1);
         nqp::p6bool(nqp::existspos($!items, nqp::unbox_i(pos)))
     }
 
     method gimme($n, :$sink) {
+        return unless self.DEFINITE;
         # loop through iterators until we have at least $n elements
         my int $count = nqp::elems(nqp::p6listitems(self));
         my $eager = nqp::p6bool(nqp::istype($n, Whatever) || $n == $Inf);
@@ -171,27 +176,93 @@ my class List does Positional {
     }
 
     method pop() is parcel {
-        fail 'Cannot .pop from an infinite list' if self.infinite; #MMD?
-        my $elems = self.elems;
+        my $elems = self.gimme(*);
+        fail 'Cannot .pop from an infinite list' if $!nextiter.defined;
         $elems > 0
           ?? nqp::pop($!items)
           !! fail 'Element popped from empty list';
     }
 
+    method shift() is parcel {
+        # make sure we have at least one item, then shift+return it
+        nqp::islist($!items) && nqp::existspos($!items, 0) || self.gimme(1)
+          ?? nqp::shift($!items) 
+          !! fail 'Element shifted from empty list';
+    }
+
     multi method push(List:D: *@values) {
-        fail 'Cannot .push to an infinite list' if self.infinite; #MMD?
         fail 'Cannot .push an infinite list' if @values.infinite;
-        my $pos = self.elems;
-        self.STORE_AT_POS($pos++, @values.shift) while @values.gimme(1);
+        self.gimme(*);
+        fail 'Cannot .push to an infinite list' if $!nextiter.defined;
+        nqp::p6listitems(self);
+
+        # don't bother with type checks
+        if ( self.of =:= Mu ) {
+            nqp::push( $!items, @values.shift ) while @values.gimme(1);
+        }
+
+        # we must check types
+        else {
+            my $of = self.of;
+            while @values.gimme(1) {
+                my $value := @values.shift;
+                if $value ~~ $of {
+                    nqp::push( $!items, $value );
+                }
+
+                # huh?
+                else {
+                    X::TypeCheck.new(
+                      operation => '.push',
+                      expected  => $of,
+                      got       => $value,
+                    ).throw;
+                }
+            }
+        }
+
         self;
     }
 
+    multi method unshift(List:D: *@values) {
+        fail 'Cannot .unshift an infinite list' if @values.infinite;
+        nqp::p6listitems(self);
+
+        # don't bother with type checks
+        if ( self.of =:= Mu ) {
+            nqp::unshift($!items, @values.pop) while @values;
+        }
+
+        # we must check types
+        else {
+            my $of = self.of;
+            while @values {
+                my $value := @values.pop;
+                if $value ~~ $of {
+                    nqp::unshift($!items, $value);
+                }
+
+                # huh?
+                else {
+                    X::TypeCheck.new(
+                      operation => '.unshift',
+                      expected  => $of,
+                      got       => $value,
+                    ).throw;
+                }
+            }
+        }
+
+        self
+    }
+
     method roll($n is copy = 1) {
-        fail "Cannot .roll from an infinite list" if self.infinite; #MMD?
-        my $elems = self.elems;
+        my $elems = self.gimme(*);
+        fail 'Cannot .roll from an infinite list' if $!nextiter.defined;
         return unless $elems;
         $n = +$Inf if nqp::istype($n, Whatever);
         return self.at_pos($elems.rand.floor) if $n == 1;
+
         gather while $n > 0 {
             take nqp::atpos($!items, nqp::unbox_i($elems.rand.floor.Int));
             $n--;
@@ -199,8 +270,8 @@ my class List does Positional {
     }
 
     method reverse() {
-        fail 'Cannot .reverse an infinite list' if self.infinite; #MMD?
         self.gimme(*);
+        fail 'Cannot .reverse from an infinite list' if $!nextiter.defined;
         my Mu $rev  := nqp::list();
         my Mu $orig := nqp::clone($!items);
         nqp::push($rev, nqp::pop($orig)) while $orig;
@@ -210,8 +281,8 @@ my class List does Positional {
     }
 
     method rotate(Int $n is copy = 1) {
-        fail 'Cannot .rotate an infinite list' if self.infinite; # MMD?
         self.gimme(*);
+        fail 'Cannot .rotate an infinite list' if $!nextiter.defined;
         my Mu $res := nqp::clone($!items);
         $n %= nqp::p6box_i(nqp::elems($!items));
         if $n > 0 {
@@ -223,21 +294,6 @@ my class List does Positional {
         my $rlist := nqp::create(self.WHAT);
         nqp::bindattr($rlist, List, '$!items', $res);
         $rlist;
-    }
-
-    method shift() is parcel {
-        # make sure we have at least one item, then shift+return it
-        nqp::islist($!items) && nqp::existspos($!items, 0) || self.gimme(1)
-          ?? nqp::shift($!items) 
-          !! fail 'Element shifted from empty list';
-    }
-
-    multi method unshift(List:D: *@elems) {
-        nqp::p6listitems(self);
-        while @elems {
-            nqp::unshift($!items, @elems.pop)
-        }
-        self
     }
 
     method splice($offset = 0, $size?, *@values) {
@@ -319,36 +375,91 @@ my class List does Positional {
         $tpos >= +$tseq;
     }
 
-    method classify ($test) { {}.classify( $test, @.list ) }
-
-    method categorize ($test) { {}.categorize( $test, @.list ) }
-
-    # This needs a way of taking a user-defined comparison
-    # specifier, but AFAIK nothing has been spec'd yet.
-    method uniq() {
+    proto method uniq(|) {*}
+    multi method uniq() {
         my $seen := nqp::hash();
-        my str $which;
+        my str $target;
         map {
-            $which = nqp::unbox_s($_.WHICH);
-            if nqp::existskey($seen, $which) {
+            $target = nqp::unbox_s($_.WHICH);
+            if nqp::existskey($seen, $target) {
                 Nil;
             }
             else {
-                nqp::bindkey($seen, $which, 1);
+                nqp::bindkey($seen, $target, 1);
                 $_;
             }
         }, @.list;
     }
-    my @secret;
-    method squish() {
-        my $last = @secret;
+    multi method uniq( :&as!, :&with! ) {
+        my @seen;  # should be Mu, but doesn't work in settings :-(
+        my Mu $target;
         map {
-            if $_ !=== $last {
-                $last = $_;
+            $target = &as($_);
+            if first( { with($target,$_) }, @seen ) =:= Nil {
+                @seen.push($target);
                 $_;
             }
             else {
                 Nil;
+            }
+        }, @.list;
+    }
+    multi method uniq( :&as! ) {
+        my $seen := nqp::hash();
+        my str $target;
+        map {
+            $target = &as($_).WHICH;
+            if nqp::existskey($seen, $target) {
+                Nil;
+            }
+            else {
+                nqp::bindkey($seen, $target, 1);
+                $_;
+            }
+        }, @.list;
+    }
+    multi method uniq( :&with! ) {
+        nextwith() if &with === &[===]; # use optimized version
+
+        my @seen;  # should be Mu, but doesn't work in settings :-(
+        my Mu $target;
+        map {
+            $target := $_;
+            if first( { with($target,$_) }, @seen ) =:= Nil {
+                @seen.push($target);
+                $_;
+            }
+            else {
+                Nil;
+            }
+        }, @.list;
+    }
+
+    my @secret;
+    proto method squish(|) {*}
+    multi method squish( :&as!, :&with = &[===] ) {
+        my $last = @secret;
+        my str $which;
+        map {
+            $which = &as($_);
+            if with($which,$last) {
+                Nil;
+            }
+            else {
+                $last = $which;
+                $_;
+            }
+        }, @.list;
+    }
+    multi method squish( :&with = &[===] ) {
+        my $last = @secret;
+        map {
+            if with($_,$last) {
+                Nil;
+            }
+            else {
+                $last = $_;
+                $_;
             }
         }, @.list;
     }
@@ -365,10 +476,6 @@ my class List does Positional {
                     nqp::elems($!items), 0);
         nqp::bindattr(self, List, '$!nextiter', nextiter);
         parcel
-    }
-
-    method STORE_AT_POS(\pos, Mu \v) is rw {
-        nqp::bindpos($!items, nqp::unbox_i(pos), v)
     }
 
     method FLATTENABLE_LIST() { self.gimme(*); $!items }
@@ -388,24 +495,28 @@ my class List does Positional {
         self.DUMP-OBJECT-ATTRS($attrs, :$indent-step, :%ctx, :$flags);
     }
 
-    method keys(List:D:) {
+    method keys(List:) {
+        return unless self.DEFINITE;
         (0..self.end).list;
     }
-    method values(List:D:) {
+    method values(List:) {
+        return unless self.DEFINITE;
         my Mu $rpa := nqp::clone(nqp::p6listitems(self));
         nqp::push($rpa, $!nextiter) if $!nextiter.defined;
         nqp::p6list($rpa, List, self.flattens);
     }
-    method pairs(List:D:) {
+    method pairs(List:) {
+        return unless self.DEFINITE;
         self.keys.map: {; $_ => self.at_pos($_) };
     }
-    method kv(List:D:) {
+    method kv(List:) {
         self.keys.map: { ($_, self.at_pos($_)) };
     }
 
-    method reduce(List:D: &with) {
+    method reduce(List: &with) {
         fail('can only reduce with arity 2')
             unless &with.arity <= 2 <= &with.count;
+        return unless self.DEFINITE;
         my Mu $val;
         for self.keys {
             if $_ == 0 {
@@ -420,6 +531,12 @@ my class List does Positional {
     method sink() {
         self.gimme(*, :sink) if self.defined;
         Nil;
+    }
+
+    # this is a remnant of a previous implementation of .push(), which
+    # apparently is used by LoL.  Please remove when no longer necessary.
+    method STORE_AT_POS(Int \pos, Mu \v) is rw {
+        nqp::bindpos($!items, nqp::unbox_i(pos), v)
     }
 }
 

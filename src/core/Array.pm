@@ -1,7 +1,8 @@
 my class X::Item { ... };
 
-class Array {
-    # Has attributes and parent List declared in BOOTSTRAP.    
+class Array { # declared in BOOTSTRAP
+    # class Array is List {
+    #     has $!descriptor;
 
     method new(:$shape = *, |) {
         my Mu $args := nqp::p6argvmarray();
@@ -105,6 +106,11 @@ class Array {
         nqp::findmethod(List, 'unshift')(self, |@values);
     }
 
+    method default() {
+        my $d := $!descriptor;
+        nqp::isnull($d) ?? Mu !! $d.default;
+    }
+
     multi method perl(Array:D \SELF:) {
         nqp::iscont(SELF)
           ?? '[' ~ self.map({.perl}).join(', ') ~ ']'
@@ -120,11 +126,6 @@ class Array {
             $i = $i + 1;
         }
         nqp::findmethod(List, 'REIFY')(self, parcel, nextiter)
-    }
-
-    method STORE_AT_POS($pos, Mu $v is copy) is rw {
-        fail "Index $pos is too large for this shaped array" unless nqp::istype($!shape, Whatever) or $pos < $!shape;
-        nqp::findmethod(List, 'STORE_AT_POS')(self, $pos, $v);
     }
 
     method STORE(|) {

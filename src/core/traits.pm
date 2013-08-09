@@ -1,15 +1,3 @@
-use Perl6::BOOTSTRAP;
-
-# Stub a few things the compiler wants to have really early on.
-my class Pair { ... }
-my class Whatever { ... }
-my class WhateverCode { ... }
-
-# Stub these or we can't use any sigil other than $.
-my role Positional { ... }
-my role Associative { ... }
-my role Callable { ... }
-
 # for errors
 my class X::Inheritance::Unsupported { ... }
 my class X::Inheritance::UnknownParent { ... }
@@ -18,6 +6,7 @@ my class X::Composition::NotComposable { ... }
 my class X::Import::MissingSymbols   { ... }
 my class X::Redeclaration { ... }
 my class X::Inheritance::SelfInherit { ... }
+my class X::Comp::Trait { ... };
 
 proto trait_mod:<is>(|) { * }
 multi trait_mod:<is>(Mu:U $child, Mu:U $parent) {
@@ -40,8 +29,14 @@ multi trait_mod:<is>(Mu:U $type, :$rw!) {
 multi trait_mod:<is>(Mu:U $type, :$nativesize!) {
     $type.HOW.set_nativesize($type, $nativesize);
 }
+multi trait_mod:<is>(Mu:U $type, :$unsigned!) {
+    $type.HOW.set_unsigned($type, $unsigned);
+}
 multi trait_mod:<is>(Mu:U $type, :$hidden!) {
     $type.HOW.set_hidden($type);
+}
+multi trait_mod:<is>(Mu:U $type, Mu :$array_type!) {
+    $type.HOW.set_array_type($type, $array_type);
 }
 multi trait_mod:<is>(Mu:U $type, *%fail) {
     if %fail.keys[0] !eq $type.HOW.name($type) {
@@ -57,6 +52,16 @@ multi trait_mod:<is>(Mu:U $type, *%fail) {
     }
 }
 
+multi trait_mod:<is>(Attribute:D $attr, |c ) {
+    X::Comp::Trait.new(
+      file       => $?FILE,
+      line       => $?LINE,
+      type       => 'is',
+      subtype    => c.hash.keys[0],
+      declaring  => 'n attribute',
+      highexpect => <rw readonly box_target>,
+    ).throw;
+}
 multi trait_mod:<is>(Attribute:D $attr, :$rw!) {
     $attr.set_rw();
 }
@@ -67,6 +72,18 @@ multi trait_mod:<is>(Attribute:D $attr, :$box_target!) {
     $attr.set_box_target();
 }
 
+multi trait_mod:<is>(Routine:D $r, |c ) {
+    X::Comp::Trait.new(
+      file       => $?FILE,
+      line       => $?LINE,
+      type       => 'is',
+      subtype    => c.hash.keys[0],
+      declaring  => ' ' ~ lc( $r.^name ),
+      highexpect => ('rw parcel hidden_from_backtrace',
+                     'pure default DEPRECATE inlinable',
+                     'prec equiv tighter looser assoc' ),
+    ).throw;
+}
 multi trait_mod:<is>(Routine:D $r, :$rw!) {
     $r.set_rw();
 }
@@ -129,6 +146,16 @@ multi trait_mod:<is>(Routine $r, :$assoc!) {
 # point we wrote its proto, we do it manually here.
 BEGIN &trait_mod:<is>.set_onlystar();
 
+multi trait_mod:<is>(Parameter:D $param, |c ) {
+    X::Comp::Trait.new(
+      file       => $?FILE,
+      line       => $?LINE,
+      type       => 'is',
+      subtype    => c.hash.keys[0],
+      declaring  => ' parameter',
+      highexpect => <rw readonly copy required parcel>,
+    ).throw;
+}
 multi trait_mod:<is>(Parameter:D $param, :$readonly!) {
     # This is the default.
 }
@@ -147,9 +174,9 @@ multi trait_mod:<is>(Parameter:D $param, :$parcel!) {
 
 # Declare these, as setting mainline doesn't get them automatically (as the
 # Mu/Any/Scalar are not loaded).
-my $! is default(Nil);
-my $/ is default(Nil);
-my $_ is default(Nil);
+my $!;
+my $/;
+my $_;
 
 sub EXPORT_SYMBOL(\exp_name, @tags, Mu \sym) {
     my @export_packages = $*EXPORT;
@@ -204,6 +231,18 @@ multi trait_mod:<is>(Mu \sym, :$export!, :$SYMBOL!) {
     EXPORT_SYMBOL($SYMBOL, @tags, sym);
 }
 
+
+# this should be identical Mu:D, :docs, otherwise the fallback Routine:D, |c
+# will catch it and declare "docs" to be an unknown trait
+multi trait_mod:<is>(Routine:D $docee, :$docs!) {
+    $docee does role {
+        has $!WHY;
+        method WHY          { $!WHY      }
+        method set_docs($d) { $!WHY = $d }
+    }
+    $docee.set_docs($docs);
+    $docs.set_docee($docee);
+}
 multi trait_mod:<is>(Mu:D $docee, :$docs!) {
     $docee does role {
         has $!WHY;

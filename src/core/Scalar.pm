@@ -4,4 +4,12 @@ my class Scalar {
         my $d := $!descriptor;
         nqp::isnull($d) ?? Str !! $d.name()
     }
+    method of() {
+        my $d := $!descriptor;
+        nqp::isnull($d) ?? Mu !! $d.of;
+    }
+    method default() {
+        my $d := $!descriptor;
+        nqp::isnull($d) ?? Mu !! $d.default;
+    }
 }

@@ -11,18 +11,32 @@ my class Any {
     # List-like methods for Any.
     ########
 
-    method eager() { nqp::p6list(nqp::list(self), List, Bool::True).eager }
+    # primitives
+    method infinite() { Nil }
+    method list() {
+        nqp::p6list(
+          self.DEFINITE ?? nqp::list(self) !! nqp::list(), List, Mu
+        );
+    }
+    method flat() {
+        nqp::p6list(
+          self.DEFINITE ?? nqp::list(self) !! nqp::list(), List, Bool::True
+        );
+    }
+    method eager() {
+        nqp::p6list(
+          self.DEFINITE ?? nqp::list(self) !! nqp::list(), List, Bool::True
+        ).eager;
+    }
+    method hash() {
+        my % = self.DEFINITE ?? self !! ();
+    }
+
+    # derived from .list
     method elems() { self.list.elems }
     method end()   { self.list.end }
-    method classify($test)   { {}.classify(   $test, self.list ) }
-    method categorize($test) { {}.categorize( $test, self.list ) }
-    method uniq() { self.list.uniq }
-    method squish() { self.list.squish }
-    method infinite() { Mu }
-    method flat() { nqp::p6list(nqp::list(self), List, Bool::True) }
-    method hash() { my % = self }
-    method list() { nqp::p6list(nqp::list(self), List, Mu) }
-    method lol()  { MapIter.new(self.list, { .item }, Mu).list }
+    method uniq(|c) { self.list.uniq(|c) }
+    method squish(|c) { self.list.squish(|c) }
     method pick($n = 1) { self.list.pick($n) }
     method roll($n = 1) { self.list.roll($n) }
     method reverse() { self.list.reverse }
@@ -31,8 +45,59 @@ my class Any {
     method keys()   { self.list.keys }
     method kv()     { self.list.kv }
     method pairs()  { self.list.pairs }
+    method reduce(&with) { self.list.reduce(&with) }
+
+    proto method classify(|) { * }
+    multi method classify($test)   {
+        {}.classify-list( $test, self.list );
+    }
+    multi method classify($test, :$into!)   {
+        ( $into // $into.new ).classify-list( $test, self.list );
+    }
+
+    proto method categorize(|) { * }
+    multi method categorize($test) {
+        {}.categorize-list( $test, self.list );
+    }
+    multi method categorize($test, :$into!) {
+        ( $into // $into.new ).categorize-list( $test, self.list );
+    }
+
+    # derived from MapIter/list
+    method lol()  {
+        MapIter.new(self.list, { .item }, Mu).list
+    }
+    method map($block) is rw {
+        MapIter.new(self, $block, Bool::True).list
+    }
+    proto method tree(|) { * }
+    multi method tree(Any:U:) { self }
+    multi method tree(Any:D:) { self.lol }
+    multi method tree(Any:D: Cool $count as Int) {
+        $count > 1
+          ?? MapIter.new(self.list, { .tree($count-1).item }, Mu).list
+          !! $count == 1
+             ?? self.lol
+             !! self
+    }
+    multi method tree(Any:D: &c) {
+        MapIter.new(self.list, { .&c.item }, Mu).list
+    }
 
     method Array() { Array.new(self.flat) }
+
+    # auto-vivifying
+    proto method push(|) { * }
+    multi method push(Any:U \SELF: *@values) {
+        &infix:<=>(SELF, Array.new);
+        SELF.push(@values);
+    }
+
+    proto method unshift(|) { * }
+    multi method unshift(Any:U \SELF: *@values) {
+        &infix:<=>(SELF, Array.new);
+        SELF.unshift(@values);
+    }
 
     method grep(Mu $test) is rw {
         self.map({ $_ if $_ ~~ $test });
@@ -57,11 +122,7 @@ my class Any {
               nqp::unbox_s(nqp::istype($tmp, Str) ?? $tmp !! $tmp.Str));
         }
         nqp::push_s($rsa, '...') if $list.infinite;
-        nqp::p6box_s(nqp::join(nqp::unbox_s($separator.Stringy), $rsa))
-    }
-
-    method map($block) is rw {
-        MapIter.new(self, $block, Bool::True).list
+        nqp::p6box_s(nqp::join(nqp::unbox_s($separator.Str), $rsa))
     }
 
     method min($by = &infix:<cmp>) {
@@ -81,7 +142,6 @@ my class Any {
         }
         $max // -$Inf;
     }
-
 
     method minmax($by = &infix:<cmp>) {
         my $cmp = $by.arity == 2 ?? $by !! { $by($^a) cmp $by($^b) };
@@ -120,32 +180,7 @@ my class Any {
                   :excludes_max($excludes_max));
     }
 
-    proto method push(|) { * }
-    multi method push(Any:U \SELF: *@values) {
-        &infix:<=>(SELF, Array.new);
-        SELF.push(@values);
-    }
-
-    proto method tree(|) { * }
-    multi method tree(Any:U:) { self }
-    multi method tree(Any:D:) { self.lol }
-    multi method tree(Any:D: Cool $count as Int) {
-        $count > 1
-          ?? MapIter.new(self.list, { .tree($count-1).item }, Mu).list
-          !! $count == 1
-             ?? self.lol
-             !! self
-    }
-    multi method tree(Any:D: &c) {
-        MapIter.new(self.list, { .&c.item }, Mu).list
-    }
-
-    proto method unshift(|) { * }
-    multi method unshift(Any:U \SELF: *@values) {
-        &infix:<=>(SELF, Array.new);
-        SELF.unshift(@values);
-    }
-
+    # []
     sub RWPAIR(\k, \v) {
         my \p := nqp::create(Pair);
         nqp::bindattr(p, Enum, '$!key', k);
@@ -674,6 +709,7 @@ my class Any {
         SELF.values
     }
 
+    # internals
     proto method at_key(|) { * }
     multi method at_key(Any:D: $key) {
         fail "postcircumfix:<\{ \}> not defined for type {self.WHAT.perl}";
@@ -685,8 +721,6 @@ my class Any {
         $v
     }
 
-    method reduce(&with) { self.list.reduce(&with) }
-
     method FLATTENABLE_LIST() { 
         my $list := self.list;
         nqp::findmethod($list, 'FLATTENABLE_LIST')($list);
@@ -695,6 +729,7 @@ my class Any {
 }
 Metamodel::ClassHOW.exclude_parent(Any);
 
+# builtin ops
 proto infix:<===>($?, $?) is pure { * }
 multi infix:<===>($a?)    { Bool::True }
 multi infix:<===>($a, $b) {
@@ -724,6 +759,7 @@ proto postfix:<-->(|)             { * }
 multi postfix:<-->(Mu:D \a is rw) { my $b = a; a = a.pred; $b }
 multi postfix:<-->(Mu:U \a is rw) { a = -1; 0 }
 
+# builtins
 proto infix:<min>(|) is pure { * }
 multi infix:<min>(*@args) { @args.min }
 # XXX the multi version suffers from a multi dispatch bug
@@ -732,7 +768,6 @@ multi infix:<min>(*@args) { @args.min }
 #multi sub min(*@args) { @args.min() }
 #multi sub min(*@args, :&by!) { @args.min(&by) }
 sub min(*@args, :&by = &infix:<cmp>) { @args.min(&by) }
-
 
 proto infix:<max>(|) is pure { * }
 multi infix:<max>(*@args) { @args.max }
@@ -785,16 +820,22 @@ proto end(|) { * }
 multi end($a) { $a.end }
 
 proto classify(|) { * }
-multi classify( $test, *@items ) { {}.classify( $test, @items ) }
+multi classify( $test, *@items ) { {}.classify-list( $test, @items ) }
+#multi classify( $test, *@items, :$into! ) {   # problem in MMD
+#    ( $into // $into.new).classify-list( $test, @items );
+#}
 
 proto categorize(|) { * }
-multi categorize( $test, *@items ) { {}.categorize( $test, @items ) }
+multi categorize( $test, *@items ) { {}.categorize-list( $test, @items ) }
+#multi categorize( $test, *@items, :$into! ) {   # problem in MMD
+#    ( $into // $into.new).categorize-list( $test, @items );
+#}
 
 proto uniq(|) { * }
-multi uniq(*@values) { @values.uniq }
+multi uniq(*@values, |c) { @values.uniq(|c) }
 
 proto squish(|) { * }
-multi squish(*@values) { @values.squish }
+multi squish(*@values, |c) { @values.squish(|c) }
 
 proto sub sort(|) {*}
 multi sub sort(*@values)      {

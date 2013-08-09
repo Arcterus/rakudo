@@ -71,9 +71,10 @@ METAMODEL_SOURCES = \
   src/Perl6/Metamodel/Trusting.nqp \
   src/Perl6/Metamodel/Mixins.nqp \
   src/Perl6/Metamodel/BUILDPLAN.nqp \
-  src/Perl6/Metamodel/REPRAttributeProtocol.nqp \
+  src/Perl6/Metamodel/REPRComposeProtocol.nqp \
   src/Perl6/Metamodel/InvocationProtocol.nqp \
   src/Perl6/Metamodel/RolePunning.nqp \
+  src/Perl6/Metamodel/ArrayType.nqp \
   src/Perl6/Metamodel/RoleToRoleApplier.nqp \
   src/Perl6/Metamodel/ConcreteRoleHOW.nqp \
   src/Perl6/Metamodel/CurriedRoleHOW.nqp \
@@ -87,6 +88,7 @@ METAMODEL_SOURCES = \
   src/Perl6/Metamodel/EnumHOW.nqp \
   src/Perl6/Metamodel/ContainerDescriptor.nqp \
   src/Perl6/Metamodel/Dispatchers.nqp \
+  src/vm/jvm/Perl6/Metamodel/JavaHOW.nqp \
 
 BOOTSTRAP_SOURCES = \
   src/Perl6/Metamodel/BOOTSTRAP.nqp \
@@ -101,6 +103,7 @@ BOOTSTRAP_SOURCES = \
 # the compiler will instantiate/call methods on while compiling the
 # setting - basically anything that feels MOP-ish.
 CORE_SOURCES = \
+  src/core/core_prologue.pm \
   src/core/traits.pm \
   src/core/Positional.pm \
   src/core/Associative.pm \
@@ -116,6 +119,7 @@ CORE_SOURCES = \
   src/core/WhateverCode.pm \
   src/core/Block.pm \
   src/core/Attribute.pm \
+  src/core/Variable.pm \
   src/core/Routine.pm \
   src/core/Sub.pm \
   src/core/Macro.pm \
@@ -132,6 +136,7 @@ CORE_SOURCES = \
   src/core/Order.pm \
   src/core/UInt64.pm \
   src/core/Num.pm \
+  src/core/Buf.pm \
   src/core/Str.pm \
   src/core/Capture.pm \
   src/core/Parcel.pm \
@@ -147,13 +152,13 @@ CORE_SOURCES = \
   src/core/Array.pm \
   src/core/Enum.pm \
   src/core/Pair.pm \
+  src/core/HashIter.pm \
   src/core/EnumMap.pm \
   src/core/Hash.pm \
   src/core/Stash.pm \
   src/core/PseudoStash.pm \
   src/core/Parameter.pm \
   src/core/Signature.pm \
-  src/core/Buf.pm \
   src/core/Rational.pm \
   src/core/Rat.pm \
   src/core/Complex.pm \
@@ -182,7 +187,9 @@ CORE_SOURCES = \
   src/core/EXPORTHOW.pm \
   src/core/Pod.pm \
   src/core/Set.pm \
+  src/core/KeySet.pm \
   src/core/Bag.pm \
+  src/core/KeyBag.pm \
   src/core/ObjAt.pm \
   src/core/Version.pm \
   src/core/ForeignCode.pm \
@@ -190,7 +197,7 @@ CORE_SOURCES = \
   src/core/metaops.pm \
   src/core/terms.pm \
   src/vm/jvm/core/Threading.pm \
-  src/core/you_are_here.pm \
+  src/core/core_epilogue.pm \
 
 CLEANUPS = \
   *.manifest \
@@ -221,8 +228,8 @@ $(RUNTIME_JAR): $(RUNTIME_JAVAS)
 	$(JAVAC) -source 1.7 -cp $(NQP_JARS) -g -d bin $(RUNTIME_JAVAS)
 	$(JAR) cf0 rakudo-runtime.jar -C bin/ .
 
-$(PERL6_ML_JAR): src/Perl6/ModuleLoader.nqp src/vm/jvm/ModuleLoaderVMConfig.nqp
-	$(PERL) $(GEN_CAT) src/vm/jvm/ModuleLoaderVMConfig.nqp src/Perl6/ModuleLoader.nqp > src/gen/ModuleLoader.nqp
+$(PERL6_ML_JAR): src/Perl6/ModuleLoader.nqp src/vm/jvm/ModuleLoaderVMConfig.nqp src/vm/jvm/Perl6/JavaModuleLoader.nqp
+	$(PERL) $(GEN_CAT) src/vm/jvm/ModuleLoaderVMConfig.nqp src/Perl6/ModuleLoader.nqp src/vm/jvm/Perl6/JavaModuleLoader.nqp > src/gen/ModuleLoader.nqp
 	$(NQP) --target=jar --output=$(PERL6_ML_JAR) --encoding=utf8 \
 	    src/gen/ModuleLoader.nqp
 

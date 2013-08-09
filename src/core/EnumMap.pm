@@ -1,12 +1,14 @@
-my class EnumMap does Associative {
-    # declared in BOOTSTRAP.pm:
+my class EnumMap does Associative { # declared in BOOTSTRAP
+    # my class EnumMap is Iterable is Cool {
     #   has $!storage;         # Parrot Hash PMC of key->value mappings
 
     multi method Bool(EnumMap:D:) {
         nqp::p6bool(nqp::defined($!storage) ?? nqp::elems($!storage) !! 0)
     }
-    method elems(EnumMap:D:) {
-        nqp::defined($!storage) ?? nqp::p6box_i(nqp::elems($!storage)) !! 0
+    method elems(EnumMap:) {
+        self.DEFINITE && nqp::defined($!storage)
+          ?? nqp::p6box_i(nqp::elems($!storage))
+          !! 0
     }
 
     multi method ACCEPTS(EnumMap:D: Any $topic) {
@@ -26,6 +28,7 @@ my class EnumMap does Associative {
     }
     
     proto method exists(|) {*}
+    multi method exists(EnumMap:U:) { False }
     multi method exists(EnumMap:D: Str:D \key) {
         nqp::p6bool(
             nqp::defined($!storage)
@@ -45,44 +48,28 @@ my class EnumMap does Associative {
             ~ ')';
     }
 
-    method iterator() { self.pairs.iterator }
-    method list() { self.pairs }
+    method iterator(EnumMap:) { self.pairs.iterator }
+    method list(EnumMap:) { self.pairs }
 
-    method keys()   { self.pairs.map( { $_.key } ) }
-    method kv()     { self.pairs.map( { $_.kv } ) }
-    method values() { self.pairs.map( { $_.value } ) }
-    method pairs() {
-        return unless nqp::defined($!storage);
-        gather {
-            my Mu $iter := nqp::iterator($!storage);
-            my Mu $pair;
-            while $iter {
-                $pair := nqp::shift($iter);
-#?if jvm
-                take Pair.new(:key(nqp::p6box_s(nqp::iterkey_s($pair))), :value(nqp::iterval($pair)));
-#?endif
-#?if parrot
-                take Pair.new(:key($pair.key), :value($pair.value));
-#?endif
-            }
-            Nil
-        }
+    method keys(EnumMap:) {
+        return unless self.DEFINITE && nqp::defined($!storage);
+        HashIter.new(self, :k).list
     }
-    method invert() {
-        gather {
-            my Mu $iter := nqp::iterator($!storage);
-            my Mu $pair;
-            while $iter {
-                $pair := nqp::shift($iter);
-#?if jvm
-                take Pair.new(:key(nqp::iterval($pair)), :value(nqp::p6box_s(nqp::iterkey_s($pair))));
-#?endif
-#?if parrot
-                take Pair.new(:key($pair.value), :value($pair.key));
-#?endif
-            }
-            Nil
-        }
+    method kv(EnumMap:) {
+        return unless self.DEFINITE && nqp::defined($!storage);
+        HashIter.new(self, :kv).list
+    }
+    method values(EnumMap:) {
+        return unless self.DEFINITE && nqp::defined($!storage);
+        HashIter.new(self, :v).list
+    }
+    method pairs(EnumMap:) {
+        return unless self.DEFINITE && nqp::defined($!storage);
+        HashIter.new(self, :pairs).list
+    }
+    method invert(EnumMap:) {
+        return unless self.DEFINITE && nqp::defined($!storage);
+        HashIter.new(self, :invert).list
     }
 
     method at_key($key) is rw {
@@ -98,7 +85,7 @@ my class EnumMap does Associative {
         nqp::bindkey($!storage, nqp::unbox_s(key.Str), value)
     }
     
-    method Capture() {
+    method Capture(EnumMap:D:) {
         my $cap := nqp::create(Capture);
         nqp::bindattr($cap, Capture, '$!hash', $!storage);
         $cap
@@ -111,7 +98,7 @@ my class EnumMap does Associative {
         $!storage
     }
 
-    method fmt($format = "%s\t\%s", $sep = "\n") {
+    method fmt(EnumMap: $format = "%s\t\%s", $sep = "\n") {
         self.pairs.fmt($format, $sep);
     }
     

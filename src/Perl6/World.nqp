@@ -328,13 +328,20 @@ class Perl6::World is HLL::World {
     
     # Loads a module immediately, and also makes sure we load it
     # during the deserialization.
-    method load_module($/, $module_name, $cur_GLOBALish) {
+    method load_module($/, $module_name, %opts, $cur_GLOBALish) {
         # Immediate loading.
-        my $line := HLL::Compiler.lineof($/.orig, $/.from, :cache(1));
-        my $module := Perl6::ModuleLoader.load_module($module_name, $cur_GLOBALish, :$line);
+        my $line   := HLL::Compiler.lineof($/.orig, $/.from, :cache(1));
+        my $module := Perl6::ModuleLoader.load_module($module_name, %opts,
+            $cur_GLOBALish, :$line);
         
         # During deserialization, ensure that we get this module loaded.
         if self.is_precompilation_mode() {
+            my $opt_hash := QAST::Op.new( :op('hash') );
+            for %opts {
+                self.add_object($_.value);
+                $opt_hash.push(QAST::SVal.new( :value($_.key) ));
+                $opt_hash.push(QAST::WVal.new( :value($_.value) ));
+            }
             self.add_load_dependency_task(:deserialize_past(QAST::Stmts.new(
                 self.perl6_module_loader_code(),
                 QAST::Op.new(
@@ -342,11 +349,12 @@ class Perl6::World is HLL::World {
                    QAST::Op.new( :op('getcurhllsym'),
                         QAST::SVal.new( :value('ModuleLoader') ) ),
                    QAST::SVal.new( :value($module_name) ),
+                   $opt_hash,
                    QAST::IVal.new(:value($line), :named('line'))
                 ))));
         }
 
-        return nqp::ctxlexpad($module);
+        return $module;
     }
     
     # Uses the NQP module loader to load Perl6::ModuleLoader, which
@@ -386,6 +394,9 @@ class Perl6::World is HLL::World {
                 # if both are multis and have onlystar dispatchers.
                 my $installed := %sym<value>;
                 my $foreign := $_.value;
+                if $installed =:= $foreign {
+                    next;
+                }
                 if nqp::can($installed, 'is_dispatcher') && $installed.is_dispatcher
                 && nqp::can($foreign, 'is_dispatcher') && $foreign.is_dispatcher {
                     # Both dispatchers, but are they onlystar? If so, we can
@@ -605,7 +616,7 @@ class Perl6::World is HLL::World {
                     QAST::Var.new( :scope('lexical'), :name($name) ),
                     QAST::SVal.new( :value('') ) ))
             }
-            return 1;
+            return nqp::null();
         }
         
         # Build container.
@@ -633,6 +644,9 @@ class Perl6::World is HLL::World {
         # Tweak var to have container.
         $var.value($cont);
         $var.decl($scope eq 'state' ?? 'statevar' !! 'contvar');
+        
+        # Evaluate to the container.
+        $cont
     }
     
     # Creates a new container descriptor and adds it to the SC.
@@ -1725,30 +1739,6 @@ class Perl6::World is HLL::World {
             ));
             return QAST::Var.new(:name('Nil'), :scope('lexical'));
         }
-        elsif $phaser eq 'START' {
-            # Create a state variable to hold the phaser's result.
-            my $pad := self.cur_lexpad();
-            my $sym := $pad.unique('START_');
-            my $mu := self.find_symbol(['Mu']);
-            my $descriptor := self.create_container_descriptor($mu, 1, $sym);
-            my %info;
-            %info<container_type> := %info<container_base> := self.find_symbol(['Scalar']);
-            %info<default_value> := %info<bind_constraint> := %info<value_type> := $mu;
-            self.install_lexical_container($pad, $sym, %info, $descriptor, :scope('state'));
-            
-            # Generate code that runs the phaser the first time we init
-            # the state block, or just evaluates to the existing value
-            # in other cases.
-            make QAST::Op.new(
-                :op('if'),
-                QAST::Op.new( :op('p6stateinit') ),
-                QAST::Op.new(
-                    :op('p6store'),
-                    QAST::Var.new( :name($sym), :scope('lexical') ),
-                    QAST::Op.new( :op('call'), QAST::WVal.new( :value($block) ) )
-                ),
-                QAST::Var.new( :name($sym), :scope('lexical') ));
-        }
         elsif $phaser eq 'PRE' || $phaser eq 'POST' {
             my $what := self.add_string_constant($phaser);
             $what.named('phaser');
@@ -1960,6 +1950,20 @@ class Perl6::World is HLL::World {
             @name
         }
         
+        method colonpairs_hash($dba) {
+            my %result;
+            for @!colonpairs {
+                if $_<identifier> {
+                    my $pair := $*W.compile_time_evaluate($_, $_.ast);
+                    %result{$pair.key} := $pair.value;
+                }
+                else {
+                    $_.CURSOR.panic("Colonpair too complex in $dba");
+                }
+            }
+            %result
+        }
+        
         method get_who() {
             $!get_who
         }
@@ -2125,7 +2129,7 @@ class Perl6::World is HLL::World {
             for %symtable -> $symp {
                 if nqp::existskey($symp.value, 'value') {
                     my $val := $symp.value<value>;
-                    if nqp::istype($val, QAST::Block) {
+                    if (try nqp::istype($val, QAST::Block)) {
                         return 0 if walk_block($val) == 0;
                     } else {
                         return 0 if $code($symp.key, $val, $symp.value) == 0;
@@ -2423,6 +2427,7 @@ class Perl6::World is HLL::World {
         %opts<panic> := @panic[0] if @panic;
         %opts<sorrows> := p6ize_recursive(@*SORROWS) if @*SORROWS;
         %opts<worries> := p6ize_recursive(@*WORRIES) if @*WORRIES;
+        %opts<filename> := nqp::box_s(nqp::getlexdyn('$?FILES'), self.find_symbol(['Str']));
         try {
             my $group_type := self.find_symbol(['X', 'Comp', 'Group']);
             return $group_type.new(|%opts);
@@ -2458,7 +2463,10 @@ class Perl6::World is HLL::World {
             # that location.
             my $c := $/.CURSOR;
             my @expected;
-            if $c.'!highwater'() >= $c.pos() {
+            if %opts<expected> {
+                @expected := %opts<expected>;
+            }
+            elsif $c.'!highwater'() >= $c.pos() {
                 my @raw_expected := $c.'!highexpect'();
                 $c.'!cursor_pos'($c.'!highwater'());
                 my %seen;

@@ -132,51 +132,6 @@ sub COMP_EXCEPTION(|) {
     }
 }
 
-my class X::Comp::Group is Exception {
-    has $.panic;
-    has @.sorrows;
-    has @.worries;
-    
-    method is-compile-time() { True }
-    
-    method gist(::?CLASS:D:) {
-        my $r = "";
-        if $.panic || @.sorrows {
-            my $color = %*ENV<RAKUDO_ERROR_COLOR> // $*OS ne 'MSWin32';
-            my ($red, $clear) = $color ?? ("\e[31m", "\e[0m") !! ("", "");
-            $r ~= "$red==={$clear}SORRY!$red===$clear\n";
-            for @.sorrows {
-                $r ~= .gist(:!sorry, :!expect) ~ "\n";
-            }
-            if $.panic {
-                $r ~= $.panic.gist(:!sorry) ~ "\n";
-            }
-        }
-        if @.worries {
-            $r ~= $.panic || @.sorrows
-                ?? "Other potential difficulties:\n"
-                !! "Potential difficulties:\n";
-            for @.worries {
-                $r ~= .gist(:!sorry, :!expect).indent(4) ~ "\n";
-            }
-        }
-        $r
-    }
-    
-    method message() {
-        my @m;
-        for @.sorrows {
-            @m.push(.message);
-        }
-        if $.panic {
-            @m.push($.panic.message);
-        }
-        for @.worries {
-            @m.push(.message);
-        }
-        @m.join("\n")
-    }
-}
 
 do {
     sub is_runtime($bt) {
@@ -428,12 +383,58 @@ my role X::Comp is Exception {
     method sorry_heading() {
         my $color = %*ENV<RAKUDO_ERROR_COLOR> // $*OS ne 'MSWin32';
         my ($red, $clear) = $color ?? ("\e[31m", "\e[0m") !! ("", "");
-        "$red==={$clear}SORRY!$red===$clear\n"
+        "$red==={$clear}SORRY!$red===$clear Error while compiling $.filename\n"
     }
     method SET_FILE_LINE($file, $line) {
         $!filename = $file;
         $!line     = $line;
         $!is-compile-time = True;
+    }
+}
+
+my class X::Comp::Group is Exception {
+    has $.panic;
+    has @.sorrows;
+    has @.worries;
+
+    method is-compile-time() { True }
+
+    multi method gist(::?CLASS:D:) {
+        my $r = "";
+        if $.panic || @.sorrows {
+            my $color = %*ENV<RAKUDO_ERROR_COLOR> // $*OS ne 'MSWin32';
+            my ($red, $clear) = $color ?? ("\e[31m", "\e[0m") !! ("", "");
+            $r ~= "$red==={$clear}SORRY!$red===$clear\n";
+            for @.sorrows {
+                $r ~= .gist(:!sorry, :!expect) ~ "\n";
+            }
+            if $.panic {
+                $r ~= $.panic.gist(:!sorry) ~ "\n";
+            }
+        }
+        if @.worries {
+            $r ~= $.panic || @.sorrows
+                ?? "Other potential difficulties:\n"
+                !! "Potential difficulties:\n";
+            for @.worries {
+                $r ~= .gist(:!sorry, :!expect).indent(4) ~ "\n";
+            }
+        }
+        $r
+    }
+
+    method message() {
+        my @m;
+        for @.sorrows {
+            @m.push(.message);
+        }
+        if $.panic {
+            @m.push($.panic.message);
+        }
+        for @.worries {
+            @m.push(.message);
+        }
+        @m.join("\n")
     }
 }
 
@@ -450,6 +451,16 @@ my class X::NYI is Exception {
     method message() { "$.feature not yet implemented. Sorry. " }
 }
 my class X::Comp::NYI is X::NYI does X::Comp { };
+
+my class X::Trait is Exception {
+    has $.type;       # is, will, of etc.
+    has $.subtype;    # wrong subtype being tried
+    has $.declaring;  # variable, sub, parameter, etc.
+    method message () {
+        "Can't use unknown trait '$.type $.subtype' in a$.declaring declaration."
+    }
+}
+my class X::Comp::Trait is X::Trait does X::Comp { };
 
 my class X::OutOfRange is Exception {
     has $.what = 'Argument';
@@ -1226,8 +1237,9 @@ my class X::Numeric::Real is Exception {
 }
 
 my class X::Numeric::DivideByZero is Exception {
+    has $.using;
     method message() {
-        "Divide by zero";
+        "Divide by zero" ~ ( $.using ?? " using $.using" !! '' );
     }
 }
 

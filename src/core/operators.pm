@@ -80,7 +80,8 @@ multi infix:<but>(Mu:U \obj, @roles) {
 }
 
 sub SEQUENCE($left, Mu $right, :$exclude_end) {
-    my @right := nqp::istype($right, Junction) ?? [$right] !! $right.flat;
+    my @right := nqp::istype($right, Junction) || !$right.DEFINITE
+      ?? [$right] !! $right.flat;
     my $endpoint = @right.shift;
     my $infinite = $endpoint ~~ Whatever || $endpoint === $Inf;
     $endpoint = Bool::False if $infinite;
@@ -303,7 +304,7 @@ sub infix:<andthen>(*@a) {
 
 # We attach precedence information to all operators here. This is instead of
 # putting the traits directly on the op bodies, since some of the things that
-# the traits are implemented using aren't defiend that early.
+# the traits are implemented using aren't defined that early.
 BEGIN {
     my Mu $methodcall     := nqp::hash('prec', 'y=');
     my Mu $autoincrement  := nqp::hash('prec', 'x=');

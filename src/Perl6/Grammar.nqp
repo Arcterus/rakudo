@@ -901,9 +901,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             my $M := %*COMPILING<%?OPTIONS><M>;
             if nqp::defined($M) {
                 for nqp::islist($M) ?? $M !! [$M] -> $longname {
-                    my $module := $*W.load_module($/,
-                                                    $longname,
-                                                    $*GLOBALish);
+                    my $module := $*W.load_module($/, $longname, {}, $*GLOBALish);
                     do_import($/, $module, $longname);
                     $/.CURSOR.import_EXPORTHOW($module);
                 }
@@ -1181,7 +1179,10 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         ]+ % ','
         {
             for $<module_name> {
-                $*W.load_module($/, ~$_<longname>, $*GLOBALish);
+                my $lnd  := $*W.dissect_longname($_<longname>);
+                my $name := $lnd.name;
+                my %cp   := $lnd.colonpairs_hash('need');
+                $*W.load_module($/, $name, %cp, $*GLOBALish);
             }
         }
     }
@@ -1203,7 +1204,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
                     $arglist := nqp::getattr($arglist.list.eager,
                             $*W.find_symbol(['List']), '$!items');
                 }
-                do_import($/, $module.WHO, ~$<module_name><longname>, $arglist);
+                do_import($/, $module.WHO, $longname.name, $arglist);
             }
             else {
                 $/.CURSOR.panic("Could not find module " ~ ~$<module_name> ~
@@ -1246,23 +1247,25 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             [
             || <.spacey> <arglist> <?{ $<arglist><EXPR> }>
                 {
+                    my $lnd     := $*W.dissect_longname($longname);
+                    my $name    := $lnd.name;
+                    my %cp      := $lnd.colonpairs_hash('use');
                     my $arglist := $*W.compile_time_evaluate($/,
                             $<arglist><EXPR>.ast);
-                    $arglist := nqp::getattr($arglist.list.eager,
+                    $arglist    := nqp::getattr($arglist.list.eager,
                             $*W.find_symbol(['List']), '$!items');
-                    my $module := $*W.load_module($/,
-                                                    ~$longname,
-                                                    $*GLOBALish);
-                    do_import($/, $module, ~$longname, $arglist);
+                    my $module  := $*W.load_module($/, $name, %cp, $*GLOBALish);
+                    do_import($/, $module, $name, $arglist);
                     $/.CURSOR.import_EXPORTHOW($module);
                 }
             || { 
                     unless ~$<doc> && !%*COMPILING<%?OPTIONS><doc> {
                         if $longname {
-                            my $module := $*W.load_module($/,
-                                                          ~$longname,
-                                                           $*GLOBALish);
-                            do_import($/, $module, ~$longname);
+                            my $lnd    := $*W.dissect_longname($longname);
+                            my $name   := $lnd.name;
+                            my %cp     := $lnd.colonpairs_hash('use');
+                            my $module := $*W.load_module($/, $name, %cp, $*GLOBALish);
+                            do_import($/, $module, $name);
                             $/.CURSOR.import_EXPORTHOW($module);
                         }
                     }
@@ -1364,6 +1367,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
     token statement_prefix:sym<sink>  { <sym> <blorst> }
     token statement_prefix:sym<try>   { <sym> <blorst> }
     token statement_prefix:sym<gather>{ <sym> <blorst> }
+    token statement_prefix:sym<once>  { <sym> <blorst> }
     token statement_prefix:sym<do>    { <sym> <blorst> }
     token statement_prefix:sym<DOC>   {
         <sym> \s <.ws> $<phase>=['BEGIN' || 'CHECK' || 'INIT']
@@ -1916,13 +1920,19 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
                             $group := $*PACKAGE;
                         }
                         else {
-                            $group := $*W.pkg_create_mo($/, %*HOW{'role-group'}, :name($longname.name()));                            
+                            $group := $*W.pkg_create_mo($/, %*HOW{'role-group'}, :name($longname.name()), :repr($*REPR));
                             $*W.install_package($/, @name, $*SCOPE, $*PKGDECL, $*OUTERPACKAGE, $outer, $group);
                         }
 
                         # Construct role meta-object with group.
+                        sub needs_args($s) {
+                            return 0 if !$s;
+                            my @params := $s[0].ast<parameters>;
+                            return 0 if nqp::elems(@params) == 0;
+                            return nqp::elems(@params) > 1 || !@params[0]<optional>;
+                        }
                         $*PACKAGE := $*W.pkg_create_mo($/, %*HOW{$*PKGDECL}, :name($longname.name()),
-                            :group($group), :signatured($<signature> ?? 1 !! 0));
+                            :repr($*REPR), :group($group), :signatured(needs_args($<signature>)));
                     }
                 }
                 else {

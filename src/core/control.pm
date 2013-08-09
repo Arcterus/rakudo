@@ -118,6 +118,15 @@ my &lastcall := -> {
     True
 };
 
+my &samewith := -> *@pos, *%named {
+    my $my   = callframe(1).my;
+    my $self = $my<self>;
+    die "Could not find 'self'" if !$self.DEFINITE;
+    my $dispatcher = $my<&?ROUTINE>.dispatcher
+      || die "Could not find dispatcher";
+    $dispatcher( $self, |@pos, |%named );
+}
+
 proto sub die(|) is hidden_from_backtrace {*};
 multi sub die(Exception $e) is hidden_from_backtrace { $e.throw }
 multi sub die($payload) is hidden_from_backtrace {
@@ -215,7 +224,11 @@ sub sleep($seconds = $Inf) {         # fractional seconds also allowed
     my $time1 = time;
     if $seconds ~~ $Inf {
         nqp::sleep(1e16) while True;
-    } else {
+    }
+    elsif $seconds < 0 {
+        fail "Cannot go {abs $seconds} seconds back in time";
+    }
+    else {
         nqp::sleep($seconds.Num);
     }
     return time - $time1;

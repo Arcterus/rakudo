@@ -927,19 +927,14 @@ If the sub is not rw, decontainerizes the return value.
 =cut
 
 */
-inline op perl6_decontainerize_return_value(out PMC, in PMC) :base_core {
-    if ($2->vtable->base_type == smo_id && Rakudo_cont_is_rw_scalar(interp, $2)) {
-        PMC *cur_ctx     = CURRENT_CONTEXT(interp);
-        PMC *parrot_sub  = Parrot_pcc_get_sub(interp, cur_ctx);
-        PMC *p6sub;
-        Rakudo_Code *code;
-        GETATTR_Sub_multi_signature(interp, parrot_sub, p6sub);
-        code = (Rakudo_Code *)PMC_data(p6sub);
-        $1 = code->rw ? $2 : Rakudo_cont_scalar_with_value_no_descriptor(interp, 
-            Rakudo_cont_decontainerize(interp, $2));
+inline op perl6_decontainerize_return_value(out PMC, invar PMC, invar PMC) :base_core {
+    if ($3->vtable->base_type == smo_id && Rakudo_cont_is_rw_scalar(interp, $3)) {
+        Rakudo_Code *code = (Rakudo_Code *)PMC_data($2);
+        $1 = code->rw ? $3 : Rakudo_cont_scalar_with_value_no_descriptor(interp, 
+            Rakudo_cont_decontainerize(interp, $3));
     }
     else {
-        $1 = $2;
+        $1 = $3;
     }
 }
 
@@ -953,7 +948,7 @@ $1 against it.
 =cut
 
 */
-inline op perl6_type_check_return_value(in PMC, in PMC) :base_core {
+inline op perl6_type_check_return_value(invar PMC, invar PMC) :base_core {
     PMC *sig_pmc = ((Rakudo_Code *)PMC_data($2))->signature;
     PMC *rtype   = ((Rakudo_Signature *)PMC_data(sig_pmc))->rtype;
     if (!PMC_IS_NULL(rtype)) {
@@ -967,7 +962,9 @@ inline op perl6_type_check_return_value(in PMC, in PMC) :base_core {
                 PMC * const thrower = Rakudo_get_thrower(interp, "X::TypeCheck::Return");
                 if (PMC_IS_NULL(thrower))
                     Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
-                        "Type check failed for return value");
+                        "Type check failed for return value; wanted %Ss but got %Ss",
+                        VTABLE_name(interp, rtype),
+                        VTABLE_name(interp, decont_value));
                 else
                     Parrot_pcc_invoke_sub_from_c_args(interp, thrower, "PP->",
                             decont_value, rtype);

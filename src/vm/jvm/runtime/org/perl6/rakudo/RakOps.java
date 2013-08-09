@@ -50,9 +50,11 @@ public final class RakOps {
         public SixModelObject AutoThreader;
         public SixModelObject EMPTYARR;
         public SixModelObject EMPTYHASH;
+        public RakudoJavaInterop rakudoInterop;
+        public SixModelObject JavaHOW;
         boolean initialized;
 
-        public GlobalExt(ThreadContext tc) { }
+        public GlobalExt(ThreadContext tc) {}
     }
 
     public static ContextKey<ThreadExt, GlobalExt> key = new ContextKey< >(ThreadExt.class, GlobalExt.class);
@@ -86,6 +88,7 @@ public final class RakOps {
             gcx.EMPTYARR = BOOTArray.st.REPR.allocate(tc, BOOTArray.st);
             SixModelObject BOOTHash = tc.gc.BOOTHash;
             gcx.EMPTYHASH = BOOTHash.st.REPR.allocate(tc, BOOTHash.st);
+            gcx.rakudoInterop = new RakudoJavaInterop(tc.gc);
             gcx.initialized = true;
         }
         return null;
@@ -115,6 +118,7 @@ public final class RakOps {
         gcx.False = conf.at_key_boxed(tc, "False");
         gcx.True = conf.at_key_boxed(tc, "True");
         gcx.Whatever = conf.at_key_boxed(tc, "Whatever");
+        gcx.JavaHOW = conf.at_key_boxed(tc, "Metamodel").st.WHO.at_key_boxed(tc, "JavaHOW");
         return conf;
     }
     
@@ -361,9 +365,38 @@ public final class RakOps {
         }
     }
     
-    public static long p6trialbind(SixModelObject routine, SixModelObject values, SixModelObject flags, ThreadContext tc) {
-        /* TODO */
-        return Binder.TRIAL_BIND_NOT_SURE;
+    public static long p6trialbind(SixModelObject sig, SixModelObject values, SixModelObject flags, ThreadContext tc) {
+        /* Get signature and parameters. */
+        GlobalExt gcx = key.getGC(tc);
+        SixModelObject params = sig.get_attribute_boxed(tc, gcx.Signature, "$!params", HINT_SIG_PARAMS);
+
+        /* Form argument array and call site descriptor. */
+        int numArgs = (int)values.elems(tc);
+        Object[] args = new Object[numArgs];
+        byte[] argFlags = new byte[numArgs];
+        for (int i = 0; i < numArgs; i++) {
+            switch ((int)flags.at_pos_boxed(tc, i).get_int(tc)) {
+                case CallSiteDescriptor.ARG_INT:
+                    args[i] = 0;
+                    argFlags[i] = CallSiteDescriptor.ARG_INT;
+                    break;
+                case CallSiteDescriptor.ARG_NUM:
+                    args[i] = 0.0;
+                    argFlags[i] = CallSiteDescriptor.ARG_NUM;
+                    break;
+                case CallSiteDescriptor.ARG_STR:
+                    args[i] = "";
+                    argFlags[i] = CallSiteDescriptor.ARG_STR;
+                    break;
+                default:
+                    args[i] = values.at_pos_boxed(tc, i);
+                    argFlags[i] = CallSiteDescriptor.ARG_OBJ;
+                    break;
+            }
+        }
+
+        /* Do trial bind. */
+        return Binder.trialBind(tc, gcx, params, new CallSiteDescriptor(argFlags, null), args);
     }
     
     public static SixModelObject p6parcel(SixModelObject array, SixModelObject fill, ThreadContext tc) {
@@ -409,10 +442,10 @@ public final class RakOps {
         return cont;
     }
     
-    public static SixModelObject p6decontrv(SixModelObject cont, ThreadContext tc) {
+    public static SixModelObject p6decontrv(SixModelObject routine, SixModelObject cont, ThreadContext tc) {
         GlobalExt gcx = key.getGC(tc);
         if (cont != null && isRWScalar(tc, gcx, cont)) {
-            tc.curFrame.codeRef.codeObject.get_attribute_native(tc, gcx.Routine, "$!rw", HINT_ROUTINE_RW);
+            routine.get_attribute_native(tc, gcx.Routine, "$!rw", HINT_ROUTINE_RW);
             if (tc.native_i == 0) {
                 /* Recontainerize to RO. */
                 SixModelObject roCont = gcx.Scalar.st.REPR.allocate(tc, gcx.Scalar.st);
@@ -796,5 +829,10 @@ public final class RakOps {
             return ((CodeRef)code).staticInfo.outerStaticInfo.staticCode;
         else
             throw ExceptionHandling.dieInternal(tc, "p6staticouter must be used on a CodeRef");
+    }
+
+    public static SixModelObject jvmrakudointerop(ThreadContext tc) {
+        GlobalExt gcx = key.getGC(tc);
+        return BootJavaInterop.RuntimeSupport.boxJava(gcx.rakudoInterop, gcx.rakudoInterop.getSTableForClass(RakudoJavaInterop.class));
     }
 }
